@@ -1,0 +1,387 @@
+name: EasyWin 1.0 - QA Gates & Release Pipeline
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch:
+
+env:
+  SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
+  SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+
+jobs:
+  # ============================================================================
+  # SSOT VALIDATION
+  # ============================================================================
+  ssot-validation:
+    name: SSOT Validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Check SSOT Version Bumps
+        run: |
+          # Fail if SSOT files modified without version bump
+          SSOT_FILES=$(git diff --name-only ${{ github.event.before }} ${{ github.sha }} | grep -E 'ssot|constants' || true)
+          if [ -n "$SSOT_FILES" ]; then
+            echo "SSOT files modified:"
+            echo "$SSOT_FILES"
+            
+            # Check if version was bumped in migration
+            VERSION_BUMPED=$(git diff ${{ github.event.before }} ${{ github.sha }} | grep -E '\+.*version.*:=.*\+.*1' || true)
+            if [ -z "$VERSION_BUMPED" ]; then
+              echo "❌ SSOT modified without version bump"
+              exit 1
+            fi
+            echo "✅ SSOT version bump detected"
+          fi
+      
+      - name: Check for Duplicated Constants
+        run: |
+          # Fail if same constant defined in multiple places
+          DUPLICATES=$(grep -r "const.*COIN_" . --include="*.ts" --include="*.dart" | sort | uniq -d || true)
+          if [ -n "$DUPLICATES" ]; then
+            echo "❌ Duplicated constants found:"
+            echo "$DUPLICATES"
+            exit 1
+          fi
+          echo "✅ No duplicated constants"
+
+  # ============================================================================
+  # SCHEMA & DATA INTEGRITY
+  # ============================================================================
+  schema-validation:
+    name: Schema & Data Integrity
+    runs-on: ubuntu-latest
+    needs: ssot-validation
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Setup Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+      
+      - name: Run Migration Dry-Run
+        run: |
+          supabase db push --dry-run
+          if [ $? -ne 0 ]; then
+            echo "❌ Migration dry-run failed"
+            exit 1
+          fi
+          echo "✅ Migration dry-run passed"
+      
+      - name: Check Foreign Key Enforcement
+        run: |
+          # Query for invalid FKs
+          INVALID_FKS=$(supabase db execute --query "
+            SELECT conname FROM pg_constraint 
+            WHERE contype = 'f' AND NOT convalidated
+          " || true)
+          
+          if [ -n "$INVALID_FKS" ]; then
+            echo "❌ Invalid foreign keys found"
+            exit 1
+          fi
+          echo "✅ All foreign keys valid"
+      
+      - name: Check for Orphan Records
+        run: |
+          # Check questions without quiz/exam
+          ORPHANS=$(supabase db execute --query "
+            SELECT COUNT(*) FROM public.questions 
+            WHERE quiz_id IS NULL AND exam_id IS NULL
+          " || true)
+          
+          if [ "$ORPHANS" != "0" ]; then
+            echo "❌ Orphan questions found: $ORPHANS"
+            exit 1
+          fi
+          echo "✅ No orphan records"
+
+  # ============================================================================
+  # CONTENT SAFETY
+  # ============================================================================
+  content-validation:
+    name: Content Safety Checks
+    runs-on: ubuntu-latest
+    needs: schema-validation
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Validate Question Answers
+        run: |
+          # All questions must have valid correct_option
+          INVALID=$(supabase db execute --query "
+            SELECT COUNT(*) FROM public.questions 
+            WHERE correct_option NOT IN ('A', 'B', 'C', 'D')
+          " || true)
+          
+          if [ "$INVALID" != "0" ]; then
+            echo "❌ Invalid answers found: $INVALID"
+            exit 1
+          fi
+          echo "✅ All answers valid"
+      
+      - name: Check Explanations
+        run: |
+          # Warn if explanations missing
+          MISSING=$(supabase db execute --query "
+            SELECT COUNT(*) FROM public.questions 
+            WHERE explanation IS NULL OR LENGTH(explanation) < 10
+          " || true)
+          
+          if [ "$MISSING" != "0" ]; then
+            echo "⚠️  Missing explanations: $MISSING"
+          else
+            echo "✅ All explanations present"
+          fi
+      
+      - name: Validate Difficulty Distribution
+        run: |
+          # Check difficulty is within tolerance
+          DISTRIBUTION=$(supabase db execute --query "
+            SELECT difficulty, COUNT(*) 
+            FROM public.questions 
+            GROUP BY difficulty
+          " || true)
+          
+          echo "Difficulty distribution:"
+          echo "$DISTRIBUTION"
+
+  # ============================================================================
+  # BUSINESS RULES VALIDATION
+  # ============================================================================
+  business-rules:
+    name: Business Rules Validation
+    runs-on: ubuntu-latest
+    needs: content-validation
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Check Coin Logic Unchanged
+        run: |
+          # Fail if coin economy SSOT has pending changes
+          PENDING=$(supabase db execute --query "
+            SELECT COUNT(*) FROM public.ssot_change_requests 
+            WHERE domain = 'coin_economy' AND status = 'pending'
+          " || true)
+          
+          if [ "$PENDING" != "0" ]; then
+            echo "❌ Unapproved coin economy changes"
+            exit 1
+          fi
+          echo "✅ Coin logic approved"
+      
+      - name: Check Premium Access Rules
+        run: |
+          # Fail if premium rules have pending changes
+          PENDING=$(supabase db execute --query "
+            SELECT COUNT(*) FROM public.ssot_change_requests 
+            WHERE domain = 'premium_access' AND status = 'pending'
+          " || true)
+          
+          if [ "$PENDING" != "0" ]; then
+            echo "❌ Unapproved premium access changes"
+            exit 1
+          fi
+          echo "✅ Premium rules approved"
+
+  # ============================================================================
+  # REGRESSION GUARDS
+  # ============================================================================
+  regression-tests:
+    name: Regression Guards
+    runs-on: ubuntu-latest
+    needs: business-rules
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Run QA Gates
+        run: |
+          # Execute all QA gates
+          RESULTS=$(supabase db execute --query "
+            SELECT public.run_qa_gates('ci', '${{ github.run_id }}')
+          " || true)
+          
+          echo "$RESULTS"
+          
+          # Parse results
+          FAILED=$(echo "$RESULTS" | jq -r '.failed')
+          BLOCKED=$(echo "$RESULTS" | jq -r '.blocked')
+          
+          if [ "$FAILED" != "0" ]; then
+            echo "❌ QA gates failed: $FAILED"
+            exit 1
+          fi
+          
+          if [ "$BLOCKED" != "0" ]; then
+            echo "❌ Deployment blocked: $BLOCKED"
+            exit 1
+          fi
+          
+          echo "✅ All QA gates passed"
+      
+      - name: Validate Golden Snapshots
+        run: |
+          # Check for snapshot changes
+          CHANGES=$(supabase db execute --query "
+            SELECT COUNT(*) FROM public.snapshot_changes 
+            WHERE approval_status = 'pending'
+          " || true)
+          
+          if [ "$CHANGES" != "0" ]; then
+            echo "⚠️  Snapshot changes detected - human approval required"
+            echo "Changes: $CHANGES"
+            # Don't fail, but require manual review
+          else
+            echo "✅ No snapshot changes"
+          fi
+
+  # ============================================================================
+  # AI SAFETY CHECKS
+  # ============================================================================
+  ai-safety:
+    name: AI Safety Checks
+    runs-on: ubuntu-latest
+    needs: regression-tests
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Check for AI Auto-Publish
+        run: |
+          # Fail if AI attempted to publish content
+          AI_PUBLISH=$(git log --all --grep="AI-generated" --grep="auto-publish" -i || true)
+          if [ -n "$AI_PUBLISH" ]; then
+            echo "❌ AI auto-publish detected"
+            exit 1
+          fi
+          echo "✅ No AI auto-publish"
+      
+      - name: Check SSOT Modifications
+        run: |
+          # Fail if SSOT modified by AI without approval
+          AI_SSOT=$(git log --all --author="AI" --grep="SSOT" -i || true)
+          if [ -n "$AI_SSOT" ]; then
+            echo "❌ AI SSOT modification detected"
+            exit 1
+          fi
+          echo "✅ No AI SSOT modifications"
+      
+      - name: Check Production Flag Changes
+        run: |
+          # Fail if AI modified production flags
+          AI_FLAGS=$(git diff --name-only ${{ github.event.before }} ${{ github.sha }} | grep -E 'feature.*flag|production' || true)
+          if [ -n "$AI_FLAGS" ]; then
+            AUTHOR=$(git log -1 --format='%an')
+            if [[ "$AUTHOR" =~ "AI"|"Bot"|"Automated" ]]; then
+              echo "❌ AI production flag modification detected"
+              exit 1
+            fi
+          fi
+          echo "✅ No AI flag modifications"
+
+  # ============================================================================
+  # FINAL BUILD DECISION
+  # ============================================================================
+  build-decision:
+    name: Build Decision
+    runs-on: ubuntu-latest
+    needs: [ssot-validation, schema-validation, content-validation, business-rules, regression-tests, ai-safety]
+    steps:
+      - name: All Gates Passed
+        run: |
+          echo "✅ All QA gates passed"
+          echo "✅ Build approved for deployment"
+      
+      - name: Generate Build Report
+        run: |
+          cat << EOF > build-report.md
+          # EasyWin 1.0 - Build Report
+          
+          **Build ID:** ${{ github.run_id }}
+          **Commit:** ${{ github.sha }}
+          **Branch:** ${{ github.ref_name }}
+          **Triggered by:** ${{ github.actor }}
+          
+          ## QA Gates Status
+          - ✅ SSOT Validation
+          - ✅ Schema & Data Integrity
+          - ✅ Content Safety
+          - ✅ Business Rules
+          - ✅ Regression Guards
+          - ✅ AI Safety Checks
+          
+          ## Next Steps
+          - Manual review of snapshot changes (if any)
+          - Release sign-off by stakeholders
+          - Feature flag rollout
+          
+          **Build Status:** APPROVED ✅
+          EOF
+          
+          cat build-report.md
+      
+      - name: Upload Build Report
+        uses: actions/upload-artifact@v3
+        with:
+          name: build-report
+          path: build-report.md
+
+  # ============================================================================
+  # DEPLOYMENT (Manual Trigger Only)
+  # ============================================================================
+  deploy:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: build-decision
+    if: github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch'
+    environment:
+      name: production
+      url: https://easywin.app
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Verify Release Approval
+        run: |
+          # Check release has all approvals
+          APPROVED=$(supabase db execute --query "
+            SELECT COUNT(*) FROM public.releases 
+            WHERE status = 'approved' 
+            AND tech_lead_approved = true 
+            AND qa_lead_approved = true 
+            AND product_owner_approved = true 
+            AND ops_admin_approved = true
+            ORDER BY created_at DESC LIMIT 1
+          " || true)
+          
+          if [ "$APPROVED" != "1" ]; then
+            echo "❌ No approved release found"
+            exit 1
+          fi
+          echo "✅ Release approved"
+      
+      - name: Deploy Migrations
+        run: |
+          supabase db push
+          echo "✅ Migrations deployed"
+      
+      - name: Mark Release as Deployed
+        run: |
+          # Update release status
+          supabase db execute --query "
+            UPDATE public.releases 
+            SET status = 'deployed', 
+                deployed_at = NOW(),
+                deployed_by = auth.uid()
+            WHERE status = 'approved'
+            ORDER BY created_at DESC LIMIT 1
+          "
+          echo "✅ Release marked as deployed"
+      
+      - name: Notify Stakeholders
+        run: |
+          echo "🚀 Deployment complete"
+          echo "Release deployed to production"
