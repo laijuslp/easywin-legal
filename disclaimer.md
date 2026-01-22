@@ -1,27 +1,46 @@
-# Disclaimer
+# Disclaimer – EasyWin
 
-_Last updated: January 22, 2026_
+**Last updated: 21 January 2026**
 
-## General Information
-
-EasyWin is an educational app designed to assist users in their learning journey. The information, content, and features provided are for general educational purposes only.
+EasyWin is an educational application designed to support learning, practice, and self-improvement. All content and features provided through the app are intended **solely for informational and educational purposes**.
 
 ## No Professional Advice
+EasyWin does not provide professional, legal, medical, psychological, financial, or certified academic advice. Any information, explanations, or suggestions made available through the app should not be considered a substitute for guidance from qualified professionals, teachers, institutions, or official authorities.
 
-The app does not provide professional, legal, medical, or financial advice. Users should consult qualified professionals for specific guidance.
+## AI-Generated Content
+EasyWin may use artificial intelligence (AI) to generate or assist with certain content. While reasonable efforts are made to ensure quality and relevance:
+- AI-generated content may be incomplete, inaccurate, or outdated
+- Errors or omissions may occur
+- Users are encouraged to independently verify important information
 
-## Accuracy of Information
+EasyWin does not guarantee the accuracy, completeness, or reliability of AI-assisted content.
 
-While we strive to provide accurate and up-to-date content, EasyWin makes no guarantees regarding the completeness, reliability, or accuracy of any information in the app.
+## Educational Outcomes
+EasyWin does not guarantee:
+- Academic performance
+- Examination results
+- Certifications
+- Admissions
+- Employment or career outcomes
 
-## Limitation of Liability
-
-EasyWin and its developers are not responsible for any loss, damage, or consequences resulting from the use or reliance on the app’s content or features.
+Learning outcomes depend on individual effort, understanding, and external factors beyond the control of EasyWin.
 
 ## External Links
+The app or associated web pages may include links to third-party websites or resources. EasyWin does not control and is not responsible for:
+- The content or accuracy of external sites
+- Their availability or practices
+- Any loss or damage arising from their use
 
-The app may contain links to third-party websites or resources. EasyWin is not responsible for the content or practices of external sites.
+## Limitation of Liability
+To the maximum extent permitted by applicable law, EasyWin, its owners, developers, and affiliates shall not be liable for any direct, indirect, incidental, consequential, or special damages arising from the use of, or inability to use, the app or its content.
+
+Use of EasyWin is at the user’s own discretion and risk.
+
+## Changes to This Disclaimer
+This disclaimer may be updated periodically. Continued use of EasyWin after any changes constitutes acceptance of the revised disclaimer.
 
 ## Contact
+For questions or concerns regarding this disclaimer, please contact:
 
-For questions about this disclaimer, email [support@easywin.com](mailto:support@easywin.com).
+**Email:** support@easywin.app
+
