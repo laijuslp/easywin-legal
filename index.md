@@ -11,3 +11,5 @@ Welcome to the EasyWin Legal & Compliance Center. Please review the following do
 - [AI Disclosure](ai-disclosure.html)
 - [Licenses](licenses.html)
 - [Contact](contact.html)
+- [Child Safety & Age Restriction Policy](child-safety-policy.html)
+
